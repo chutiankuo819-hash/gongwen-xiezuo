@@ -5,6 +5,8 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+sys.dont_write_bytecode = True
+from import_docx import BUNDLED_WORD, read_bundled_word
 
 REFERENCES = Path(__file__).resolve().parents[1] / 'references'
 LIBRARY = REFERENCES / 'xi-phrases.jsonl'
@@ -31,15 +33,15 @@ def arguments():
     parser.add_argument('--source', choices=SOURCES, default='primary', help='本人原文或报道直接引语')
     parser.add_argument('--sentences', action='store_true', help='查看按主题推荐的原文出处及古诗文用例')
     parser.add_argument('--usage', action='store_true', help='列出当前结果的用途')
-    parser.add_argument('--book', action='store_true', help='仅保留在自己导入的资料中逐字出现的词句')
-    parser.add_argument('--book-index', type=Path, default=LOCAL_INDEX, help='配合 --book 指定本地导入索引')
+    parser.add_argument('--book', action='store_true', help='只查在个人资料或随附原书中逐字出现的词句；个人资料优先')
+    parser.add_argument('--book-index', type=Path, help='配合 --book 只查指定的 JSONL 索引')
     parser.add_argument('--limit', type=int, default=8, help='展示1至100条，默认8条')
     args = parser.parse_args()
     if not 1 <= args.limit <= 100:
         parser.error('--limit 须在1至100之间。')
     if args.sentences and (args.length or args.preferred or args.source == 'reports'):
         parser.error('--sentences 使用本人原文出处，不能与 --length、--preferred 或 --source reports 合用。')
-    if not args.book and args.book_index != LOCAL_INDEX:
+    if not args.book and args.book_index is not None:
         parser.error('--book-index 应与 --book 合用。')
     return args
 
@@ -51,15 +53,37 @@ def read_records(path):
                 yield json.loads(line)
 
 
-def display(row, source, in_material):
+def filter_material(matches, custom_index):
+    if custom_index is not None:
+        materials = [('指定索引', custom_index)]
+    else:
+        materials = [(label, path) for label, path in (
+            ('本地导入资料', LOCAL_INDEX), ('随附原书', BUNDLED_WORD)
+        ) if path.is_file()]
+    if not materials:
+        raise ValueError('缺少个人资料及随附原书。可用 scripts/import_docx.py 导入资料，或使用 --book-index。')
+    for label, path in materials:
+        pending = [row for _, row in matches if row.get('text') and 'book_origin' not in row]
+        if not pending and custom_index is None:
+            break
+        records = read_bundled_word() if path == BUNDLED_WORD else read_records(path)
+        # Keep each source and paragraph separate, so a match cannot span two records.
+        text = '\n'.join(record['text'] for record in records)
+        for row in pending:
+            if row['text'] in text:
+                row['book_origin'] = label
+    return [(score, row) for score, row in matches if 'book_origin' in row]
+
+
+def display(row, source):
     kind = row['kind']
     name = row.get('text') or row['topic']
     label = {'reference': '原文线索，标题为主题提示', 'classic': '讲话中引用的古诗文', 'phrase': '短语'}[kind]
     tags = [label, row['usage']]
     if row.get('featured'):
         tags.append('写作精选')
-    if in_material:
-        tags.append('见于本地导入资料')
+    if row.get('book_origin'):
+        tags.append('见于' + row['book_origin'])
     print(f"{name}  [{' / '.join(tags)}]")
     ref = row[source]
     if kind == 'phrase':
@@ -71,14 +95,6 @@ def display(row, source, in_material):
 
 def main():
     args = arguments()
-    material = None
-    if args.book:
-        if not args.book_index.is_file():
-            print('尚未找到本地资料索引。请先运行 scripts/import_docx.py 导入自己的 Word，或用 --book-index 指定已有索引。', file=sys.stderr)
-            return 2
-        # A paragraph break keeps matches from joining the end and start of different examples.
-        material = '\n'.join(row['text'] for row in read_records(args.book_index))
-
     default_browse = not (args.keywords or args.length or args.book or args.usage or args.sentences) and args.source == 'primary'
     matches = []
     for row in read_records(LIBRARY):
@@ -90,13 +106,13 @@ def main():
         if (args.preferred or default_browse) and not row.get('featured'):
             continue
         term = row.get('text', '')
-        if material is not None and (not term or term not in material):
-            continue
         subject = ' '.join((row['usage'], KEYWORDS.get(row['usage'], ''), row.get('topic', ''), row.get('origin', '')))
         if not all(k in term or k in subject for k in args.keywords):
             continue
         relevance = sum(3 if k == term else 2 if k in term else 1 for k in args.keywords)
         matches.append((relevance, row))
+    if args.book:
+        matches = filter_material(matches, args.book_index)
     if not matches:
         print('没有匹配项。可以缩短关键词，或用 --usage 查看用途分类。')
         return 1
@@ -116,7 +132,7 @@ def main():
                 by_group[usage] = item
         matches = list(by_group.values()) + rest
     for _, row in matches[:args.limit]:
-        display(row, args.source, args.book)
+        display(row, args.source)
     return 0
 
 

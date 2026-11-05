@@ -14,6 +14,7 @@ from zipfile import BadZipFile, ZipFile
 
 
 DEFAULT_OUTPUT = Path(__file__).resolve().parents[1] / 'references' / 'local-phrasebook.jsonl'
+BUNDLED_WORD = DEFAULT_OUTPUT.with_name('公文写作词句应用大全（500页25万字）.docx')
 W = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
 LABEL = re.compile(r'^(?:第[一二三四五六七八九十百〇零两\d]+[章节篇部分]|[一二三四五六七八九十百]+[、．.]|[（(][一二三四五六七八九十百]+[)）])')
 PAGE = re.compile(r'[\s.．…·]*(\d+)\s*$')
@@ -145,7 +146,7 @@ def find_catalog(rows):
     return rows[start:stop], rows[stop:]
 
 
-def index_document(path):
+def index_document(path, id_prefix='L'):
     catalog, rows = find_catalog(get_paragraphs(path))
     section_pages = {}
     chapters = []
@@ -167,7 +168,7 @@ def index_document(path):
     def append(text, ix, example=None):
         if not text.strip():
             return
-        row = {'id':f'L{len(output)+1:05d}', 'chapter':chapter, 'section':section,
+        row = {'id':f'{id_prefix}{len(output)+1:05d}', 'chapter':chapter, 'section':section,
                'text':text.strip(), 'paragraph':ix}
         if page is not None:
             row['page'] = page
@@ -214,6 +215,14 @@ def index_document(path):
     if not output:
         raise ValueError('没有可索引的正文段落。扫描图片需要先做文字识别。')
     return output
+
+
+def read_bundled_word():
+    """Read the distributed document in memory without creating a local index."""
+    try:
+        return index_document(BUNDLED_WORD, id_prefix='B')
+    except (BadZipFile, ET.ParseError, RuntimeError) as exc:
+        raise ValueError(f'无法解析随附原书 {BUNDLED_WORD.name}：{exc}') from exc
 
 
 def save(rows, target, replace):

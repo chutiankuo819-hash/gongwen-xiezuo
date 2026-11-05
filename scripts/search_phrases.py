@@ -1,4 +1,4 @@
-"""按词语、段落用途或篇目检索个人导入的资料和随附写作示例。"""
+"""按词语、段落用途或篇目检索个人资料、随附原书和写作示例。"""
 
 import argparse
 import json
@@ -8,10 +8,13 @@ import unicodedata
 from collections import Counter
 from pathlib import Path
 
+sys.dont_write_bytecode = True
+from import_docx import BUNDLED_WORD, read_bundled_word
 
 REFERENCES = Path(__file__).resolve().parents[1] / 'references'
 LIBRARIES = {
     'local': ('本地导入', REFERENCES / 'local-phrasebook.jsonl'),
+    'bundled': ('随附原书', BUNDLED_WORD),
     'examples': ('内置示例', REFERENCES / 'phrasebook.jsonl'),
 }
 
@@ -19,6 +22,11 @@ LIBRARIES = {
 def read_book(source):
     records = []
     label, path = LIBRARIES[source]
+    if source == 'bundled':
+        for entry in read_bundled_word():
+            entry['origin'] = label
+            records.append(entry)
+        return records
     with path.open(encoding='utf-8-sig') as stream:
         for number, line in enumerate(stream, 1):
             if not line.strip():
@@ -89,8 +97,8 @@ def main(argv=None):
     mode.add_argument('--id', help='按编号逐字显示整条原文')
     parser.add_argument('--chapter', help='限定篇目，支持篇名中的一段连续文字')
     parser.add_argument('--section', help='限定小节，支持节名片段；无关键词时按原序展示整节原文')
-    parser.add_argument('--source', choices=('auto','local','examples','all'), default='auto',
-                        help='auto 优先本地导入，未命中时查内置示例；all 同时搜索两者')
+    parser.add_argument('--source', choices=('auto', *LIBRARIES, 'all'), default='auto',
+                        help='auto 按个人资料、随附原书、内置示例依次检索；all 同时查全部可用资料')
     parser.add_argument('--limit', type=int, help='最多返回几条；默认查词 8 条、单独浏览小节时返回整节')
     args = parser.parse_args(argv)
     terms = list(dict.fromkeys(' '.join(args.keywords).casefold().split()))
@@ -110,45 +118,49 @@ def main(argv=None):
     if args.source == 'local' and not LIBRARIES['local'][1].is_file():
         print('尚无本地资料，请先运行 scripts/import_docx.py 导入 Word 文档。', file=sys.stderr)
         return 2
-    try:
-        entries = [row for source in sources for row in read_book(source)]
-        if not entries:
-            raise ValueError('未找到资料，请检查 references 目录或导入 Word 文档。')
-    except (OSError, ValueError) as error:
-        print(f'无法读取词句库：{error}', file=sys.stderr)
-        return 2
-
-    if args.list_chapters:
-        for (label,chapter), count in Counter((item['origin'],item['chapter']) for item in entries).items():
-            print(f'{label} · {chapter}\t{count} 条')
-        return 0
-    if args.id is not None:
-        for item in entries:
-            if str(item['id']) == args.id:
-                show(item, item['text'])
-                return 0
-        print('未找到该编号。请先用主题词检索，再复制结果里的完整编号。')
-        return 1
-
     chapter = title_key(args.chapter or '')
     section = title_key(args.section or '')
     results = []
-    for item in entries:
-        if chapter and chapter not in title_key(item['chapter']):
-            continue
-        if section and section not in title_key(item['section']):
-            continue
-        score, anchors = rank(item, terms)
-        if score[0] or not terms:
-            results.append((score, item, anchors))
+    id_source = {'L':'local', 'B':'bundled', 'P':'examples'}.get((args.id or '')[:1])
+    try:
+        if not sources:
+            raise ValueError('未找到资料，请检查 references 目录或导入 Word 文档。')
+        for source in sources:
+            if args.id is not None and id_source and id_source != source:
+                continue
+            entries = read_book(source)
+            if args.list_chapters:
+                for name, count in Counter(item['chapter'] for item in entries).items():
+                    print(f'{LIBRARIES[source][0]} · {name}\t{count} 条')
+                continue
+            if args.id is not None:
+                for item in entries:
+                    if str(item['id']) == args.id:
+                        show(item, item['text'])
+                        return 0
+                continue
+            for item in entries:
+                if chapter and chapter not in title_key(item['chapter']):
+                    continue
+                if section and section not in title_key(item['section']):
+                    continue
+                score, anchors = rank(item, terms)
+                if score[0] or not terms:
+                    results.append((score, item, anchors))
+            if args.source == 'auto' and results:
+                break
+    except (OSError, ValueError) as error:
+        print(f'无法读取词句库：{error}', file=sys.stderr)
+        return 2
+    if args.list_chapters:
+        return 0
+    if args.id is not None:
+        print('未找到该编号。请先用主题词检索，再复制结果里的完整编号。')
+        return 1
+
     if not results:
         print('没有匹配条目。请缩短关键词或节名，去掉篇目限制，或用 --list-chapters 查看篇名。')
         return 1
-
-    if args.source == 'auto':
-        local = [item for item in results if item[1]['origin'] == LIBRARIES['local'][0]]
-        if local:
-            results = local
 
     if terms:
         results.sort(key=lambda match: match[0], reverse=True)
