@@ -1,6 +1,8 @@
 # Personal source documents and locally generated indexes.
 references/local-phrasebook*.jsonl
+references/local-style.md
 *.docx
+!references/公文写作词句应用大全（500页25万字）.docx
 *.xlsx
 *.pdf
 *.zip
