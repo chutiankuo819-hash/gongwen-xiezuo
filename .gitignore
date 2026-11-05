@@ -1,0 +1,11 @@
+# Personal source documents and locally generated indexes.
+references/local-phrasebook*.jsonl
+*.docx
+*.xlsx
+*.pdf
+*.zip
+*.tmp
+__pycache__/
+*.py[cod]
+.DS_Store
+Thumbs.db
