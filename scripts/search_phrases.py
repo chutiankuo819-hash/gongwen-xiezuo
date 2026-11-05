@@ -13,8 +13,8 @@ from import_docx import BUNDLED_WORD, read_bundled_word
 
 REFERENCES = Path(__file__).resolve().parents[1] / 'references'
 LIBRARIES = {
-    'local': ('本地导入', REFERENCES / 'local-phrasebook.jsonl'),
     'bundled': ('随附原书', BUNDLED_WORD),
+    'local': ('本地导入', REFERENCES / 'local-phrasebook.jsonl'),
     'examples': ('内置示例', REFERENCES / 'phrasebook.jsonl'),
 }
 
@@ -98,7 +98,7 @@ def main(argv=None):
     parser.add_argument('--chapter', help='限定篇目，支持篇名中的一段连续文字')
     parser.add_argument('--section', help='限定小节，支持节名片段；无关键词时按原序展示整节原文')
     parser.add_argument('--source', choices=('auto', *LIBRARIES, 'all'), default='auto',
-                        help='auto 按个人资料、随附原书、内置示例依次检索；all 同时查全部可用资料')
+                        help='auto 按随附原书、个人资料、内置示例依次检索；all 同时查全部可用资料')
     parser.add_argument('--limit', type=int, help='最多返回几条；默认查词 8 条、单独浏览小节时返回整节')
     args = parser.parse_args(argv)
     terms = list(dict.fromkeys(' '.join(args.keywords).casefold().split()))

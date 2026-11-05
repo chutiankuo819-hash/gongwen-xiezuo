@@ -6,7 +6,8 @@ from collections import Counter
 from pathlib import Path
 
 sys.dont_write_bytecode = True
-from import_docx import BUNDLED_WORD, read_bundled_word
+from import_docx import BUNDLED_WORD
+from read_original import load as read_full_book
 
 REFERENCES = Path(__file__).resolve().parents[1] / 'references'
 LIBRARY = REFERENCES / 'xi-phrases.jsonl'
@@ -33,7 +34,7 @@ def arguments():
     parser.add_argument('--source', choices=SOURCES, default='primary', help='本人原文或报道直接引语')
     parser.add_argument('--sentences', action='store_true', help='查看按主题推荐的原文出处及古诗文用例')
     parser.add_argument('--usage', action='store_true', help='列出当前结果的用途')
-    parser.add_argument('--book', action='store_true', help='只查在个人资料或随附原书中逐字出现的词句；个人资料优先')
+    parser.add_argument('--book', action='store_true', help='查找也见于随附全书的词句；原书优先，个人资料补充')
     parser.add_argument('--book-index', type=Path, help='配合 --book 只查指定的 JSONL 索引')
     parser.add_argument('--limit', type=int, default=8, help='展示1至100条，默认8条')
     args = parser.parse_args()
@@ -58,7 +59,7 @@ def filter_material(matches, custom_index):
         materials = [('指定索引', custom_index)]
     else:
         materials = [(label, path) for label, path in (
-            ('本地导入资料', LOCAL_INDEX), ('随附原书', BUNDLED_WORD)
+            ('随附原书', BUNDLED_WORD), ('本地导入资料', LOCAL_INDEX)
         ) if path.is_file()]
     if not materials:
         raise ValueError('缺少个人资料及随附原书。可用 scripts/import_docx.py 导入资料，或使用 --book-index。')
@@ -66,9 +67,12 @@ def filter_material(matches, custom_index):
         pending = [row for _, row in matches if row.get('text') and 'book_origin' not in row]
         if not pending and custom_index is None:
             break
-        records = read_bundled_word() if path == BUNDLED_WORD else read_records(path)
-        # Keep each source and paragraph separate, so a match cannot span two records.
-        text = '\n'.join(record['text'] for record in records)
+        # Search the whole book, including headings and table paragraphs.
+        if path == BUNDLED_WORD:
+            paragraphs, _ = read_full_book()
+            text = '\n'.join(paragraphs)
+        else:
+            text = '\n'.join(record['text'] for record in read_records(path))
         for row in pending:
             if row['text'] in text:
                 row['book_origin'] = label
